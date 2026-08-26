@@ -32,6 +32,12 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ZunoChat necesita acceso a tus fotos para que puedas enviarlas en el chat."
+        }
       ]
     ],
     "experiments": {
