@@ -1,5 +1,5 @@
 import { apiClient } from "@/services/api.config";
-import type { ApiResponse, BlockedUserResponse, UserSearchResult } from "@/types";
+import type { ApiResponse, BlockedUserResponse, ThemePreference, UserProfileResponse, UserSearchResult } from "@/types";
 
 export const userService = {
   // GET /api/users/search?q=
@@ -8,6 +8,22 @@ export const userService = {
       params: { q },
     });
     return res.data.data;
+  },
+
+  // GET /api/users/{id}/profile — perfil público, para el panel de "datos del contacto"
+  getProfile: async (userId: number): Promise<UserProfileResponse> => {
+    const res = await apiClient.get<ApiResponse<UserProfileResponse>>(`/api/users/${userId}/profile`);
+    return res.data.data;
+  },
+
+  // PATCH /api/users/me/phone — phone null o "" borra el guardado
+  updatePhone: async (phone: string | null): Promise<void> => {
+    await apiClient.patch<ApiResponse<null>>("/api/users/me/phone", { phone });
+  },
+
+  // PATCH /api/users/me/theme
+  updateTheme: async (theme: ThemePreference): Promise<void> => {
+    await apiClient.patch<ApiResponse<null>>("/api/users/me/theme", { theme });
   },
 
   // POST /api/users/{id}/block

@@ -13,8 +13,10 @@ type Step = "register" | "verify-otp";
 const RESEND_COOLDOWN_SECONDS = 60;
 
 function extractMessage(err: unknown, fallback: string): string {
-  const e = err as { response?: { data?: { message?: string } } };
-  return e?.response?.data?.message ?? fallback;
+  const e = err as { response?: { data?: { message?: string } }; message?: string; code?: string };
+  if (e?.response?.data?.message) return e.response.data.message;
+  // TEMPORAL — diagnóstico de conectividad, ver login.tsx. Quitar una vez resuelto.
+  return `${fallback} [DEBUG: code=${e?.code ?? "?"} msg=${e?.message ?? "?"}]`;
 }
 
 export default function RegisterScreen() {

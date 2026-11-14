@@ -2,6 +2,7 @@ import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/ui/Avatar";
+import { StreakBadge } from "@/components/chat/StreakBadge";
 import { useTheme } from "@/hooks/use-theme";
 import { useIsOnline } from "@/hooks/usePresence";
 import { relativeTime } from "@/lib/format";
@@ -14,26 +15,31 @@ interface Props {
 
 export const ConversationRow = memo(function ConversationRow({ conversation, onPress }: Props) {
   const theme = useTheme();
-  const { otherUserId, otherUsername, lastMessagePreview, lastMessageIsMine, lastMessageAt, unreadCount, status, muted } = conversation;
+  const { conversationId, otherUserId, otherUsername, lastMessagePreview, lastMessageIsMine, lastMessageAt, unreadCount, status, muted } =
+    conversation;
+  const isGroup = conversation.type === "GROUP";
+  const displayName = isGroup ? conversation.groupName ?? "Grupo" : otherUsername ?? "";
   const preview = lastMessageIsMine ? `Tú: ${lastMessagePreview ?? ""}` : (lastMessagePreview ?? "");
 
   // Presencia en vivo por WS si ya llegó algún evento; si no, cae al status del REST inicial.
-  const liveOnline = useIsOnline(otherUserId);
-  const isOnline = liveOnline ?? status === "ONLINE";
+  // Sin sentido en GROUP — no hay un único "otro usuario" del que trackear presencia.
+  const liveOnline = useIsOnline(otherUserId ?? undefined);
+  const isOnline = !isGroup && (liveOnline ?? status === "ONLINE");
 
   return (
     <Pressable
       onPress={() => onPress(conversation)}
       style={({ pressed }) => [styles.row, { borderBottomColor: theme.border }, pressed && { backgroundColor: theme.backgroundElement }]}
     >
-      <Avatar seed={otherUserId} label={otherUsername} size={48} online={isOnline} />
+      <Avatar seed={isGroup ? conversationId : otherUserId ?? 0} label={displayName} size={48} online={isOnline} />
       <View style={styles.middle}>
         <View style={styles.topLine}>
           <View style={styles.usernameRow}>
             {muted && <Text style={styles.mutedIcon}>🔇</Text>}
             <Text numberOfLines={1} style={[styles.username, { color: theme.text }]}>
-              {otherUsername}
+              {displayName}
             </Text>
+            {!isGroup && <StreakBadge conversationId={conversationId} />}
           </View>
           {!!lastMessageAt && <Text style={[styles.time, { color: theme.textSecondary }]}>{relativeTime(lastMessageAt)}</Text>}
         </View>

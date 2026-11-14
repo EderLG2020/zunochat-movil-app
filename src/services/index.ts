@@ -6,3 +6,5 @@ export { userService } from "@/services/user.service";
 export { adminService } from "@/services/admin.service";
 export { uploadService } from "@/services/upload.service";
 export { wsService } from "@/services/websocket.service";
+export { streakService } from "@/services/streak.service";
+export { presenceService } from "@/services/presence.service";

@@ -4,6 +4,7 @@ import * as ImagePicker from "expo-image-picker";
 
 import { useTheme } from "@/hooks/use-theme";
 import { useTypingIndicator } from "@/hooks/useWebSocket";
+import { newClientMessageId } from "@/lib/id";
 import { messageService, uploadService } from "@/services";
 import { useChatStore } from "@/store/chatStore";
 
@@ -66,7 +67,12 @@ export function MessageInput({ conversationId, onSend, disabled = false }: Props
         mimeType: asset.mimeType ?? "image/jpeg",
       }));
       const urls = await uploadService.upload(picked);
-      const msg = await messageService.send({ conversationId, type: "IMAGE", fileUrls: urls });
+      const msg = await messageService.send({
+        conversationId,
+        type: "IMAGE",
+        fileUrls: urls,
+        clientMessageId: newClientMessageId(),
+      });
       appendMessage(msg);
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } };

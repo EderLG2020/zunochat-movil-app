@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { presenceService } from "@/services/presence.service";
 import { wsService } from "@/services/websocket.service";
 import { useAuthStore } from "@/store/authStore";
 import { usePresenceStore } from "@/store/presenceStore";
@@ -8,6 +9,11 @@ import { usePresenceStore } from "@/store/presenceStore";
  * Suscribe a /topic/presence.{userId} para cada id de la lista — se
  * resuscribe solo cuando el conjunto de ids realmente cambia (no en cada
  * render). Pensado para la lista de conversaciones y el header del chat activo.
+ *
+ * También pide el snapshot inicial por REST (GET /api/presence?ids=): el WS
+ * solo avisa CAMBIOS a quien ya esté suscripto en el momento en que ocurren,
+ * así que sin esto alguien que ya estaba online al abrir la app se veía
+ * "desconectado" hasta el próximo cambio de estado suyo.
  */
 export function usePresenceSubscriptions(userIds: number[]): void {
   const token = useAuthStore((s) => s.token);
@@ -18,6 +24,8 @@ export function usePresenceSubscriptions(userIds: number[]): void {
     const ids = idsKey ? idsKey.split(",").map(Number) : [];
     if (!token || ids.length === 0) return;
 
+    let cancelled = false;
+
     const subscribe = () => {
       ids.forEach((id) => wsService.subscribeToPresence(id, applyEvent));
     };
@@ -25,7 +33,16 @@ export function usePresenceSubscriptions(userIds: number[]): void {
     if (wsService.isConnected) subscribe();
     else wsService.connect(token, subscribe);
 
+    presenceService
+      .snapshot(ids)
+      .then((results) => {
+        if (cancelled) return;
+        results.forEach((r) => applyEvent({ userId: r.userId, username: "", online: r.online, lastSeen: r.lastSeen }));
+      })
+      .catch(() => {});
+
     return () => {
+      cancelled = true;
       ids.forEach((id) => wsService.unsubscribeFromPresence(id));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

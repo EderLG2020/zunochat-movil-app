@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { Avatar } from "@/components/ui/Avatar";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { ContactProfileSheet } from "@/components/chat/ContactProfileSheet";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { MessageInput } from "@/components/chat/MessageInput";
 import { TypingDots } from "@/components/chat/TypingDots";
@@ -13,6 +14,7 @@ import { useMessages } from "@/hooks/useMessages";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useIsOnline } from "@/hooks/usePresence";
 import { dayLabel } from "@/lib/format";
+import { newClientMessageId } from "@/lib/id";
 import { conversationService, messageService, userService } from "@/services";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
@@ -47,13 +49,16 @@ export default function ChatScreen() {
   const showInitialLoader = isLoading && messages.length === 0;
   const listRef = useRef<FlatList>(null);
 
-  // Menú de opciones del chat (silenciar / bloquear)
+  const isGroup = activeConversation?.type === "GROUP";
+
+  // Menú de opciones del chat (silenciar / bloquear) — bloquear no aplica a GROUP
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [blockedIds, setBlockedIds] = useState<Set<number>>(new Set());
   useEffect(() => {
     userService.listBlocked().then((list) => setBlockedIds(new Set(list.map((b) => b.id)))).catch(() => {});
   }, []);
-  const isBlocked = activeConversation ? blockedIds.has(activeConversation.otherUserId) : false;
+  const isBlocked = activeConversation?.otherUserId != null ? blockedIds.has(activeConversation.otherUserId) : false;
 
   const toggleMute = async () => {
     if (!activeConversation) return;
@@ -63,7 +68,7 @@ export default function ChatScreen() {
   };
 
   const toggleBlock = () => {
-    if (!activeConversation) return;
+    if (!activeConversation || activeConversation.otherUserId == null) return;
     setMenuOpen(false);
     const otherId = activeConversation.otherUserId;
     if (isBlocked) {
@@ -80,8 +85,8 @@ export default function ChatScreen() {
     ]);
   };
 
-  // Presencia en vivo del contacto actual
-  const liveOnline = useIsOnline(activeConversation?.otherUserId);
+  // Presencia en vivo del contacto actual — sin sentido para GROUP
+  const liveOnline = useIsOnline(activeConversation?.otherUserId ?? undefined);
 
   // eventType "MESSAGE_UPDATED" (edición/borrado) actualiza el mensaje existente
   // en vez de agregar uno nuevo — mismo topic, distinto tratamiento.
@@ -130,7 +135,12 @@ export default function ChatScreen() {
 
   const handleSend = async (text: string) => {
     if (!conversationId) return;
-    const msg = await messageService.send({ conversationId, type: "TEXT", textContent: text });
+    const msg = await messageService.send({
+      conversationId,
+      type: "TEXT",
+      textContent: text,
+      clientMessageId: newClientMessageId(),
+    });
     appendMessage(msg); // el WS también lo trae — el store deduplica por messageId
   };
 
@@ -149,10 +159,16 @@ export default function ChatScreen() {
 
   if (!conversationId) return null;
 
-  const otherUsername = activeConversation?.otherUsername ?? "Conversación";
-  const otherUserId = activeConversation?.otherUserId ?? conversationId;
+  const displayName = isGroup ? activeConversation?.groupName ?? "Grupo" : activeConversation?.otherUsername ?? "Conversación";
+  const avatarSeed = isGroup ? conversationId : activeConversation?.otherUserId ?? conversationId;
   const isOnline = liveOnline ?? activeConversation?.status === "ONLINE";
-  const statusLabel = typingUserId ? "Escribiendo..." : isOnline ? "En línea" : "Desconectado";
+  const statusLabel = typingUserId
+    ? "Escribiendo..."
+    : isGroup
+      ? `${activeConversation?.members?.length ?? 0} miembros`
+      : isOnline
+        ? "En línea"
+        : "Desconectado";
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.chatBackground }]} edges={["top", "left", "right"]}>
@@ -160,15 +176,24 @@ export default function ChatScreen() {
         <Pressable onPress={() => router.back()} hitSlop={10} style={styles.backButton}>
           <Text style={[styles.backIcon, { color: theme.text }]}>‹</Text>
         </Pressable>
-        <Avatar seed={otherUserId} label={otherUsername} size={36} />
-        <View style={styles.headerTexts}>
-          <Text style={[styles.headerTitle, { color: theme.text }]} numberOfLines={1}>
-            {otherUsername}
-          </Text>
-          <Text style={[styles.headerSubtitle, { color: typingUserId ? theme.primary : theme.textSecondary }]}>
-            {statusLabel}
-          </Text>
-        </View>
+        <Pressable
+          style={styles.headerInfo}
+          disabled={isGroup}
+          onPress={() => {
+            if (!isGroup) setShowProfile(true);
+          }}
+        >
+          <Avatar seed={avatarSeed} label={displayName} size={36} />
+          <View style={styles.headerTexts}>
+            <Text style={[styles.headerTitle, { color: theme.text }]} numberOfLines={1}>
+              {displayName}
+            </Text>
+            <Text style={[styles.headerSubtitle, { color: typingUserId ? theme.primary : theme.textSecondary }]}>
+              {statusLabel}
+            </Text>
+          </View>
+        </Pressable>
+        {activeConversation?.ephemeralEnabled && <Text style={styles.ephemeralIcon}>⏳</Text>}
         <Pressable onPress={() => setMenuOpen(true)} hitSlop={10} style={styles.menuButton}>
           <Text style={[styles.menuIcon, { color: theme.text }]}>⋮</Text>
         </Pressable>
@@ -177,17 +202,27 @@ export default function ChatScreen() {
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setMenuOpen(false)}>
           <View style={[styles.actionSheet, { backgroundColor: theme.card }]}>
-            <Pressable onPress={toggleMute} style={[styles.actionRow, { borderBottomColor: theme.border }]}>
+            <Pressable onPress={toggleMute} style={[styles.actionRow, !isGroup && { borderBottomColor: theme.border }]}>
               <Text style={{ fontSize: 14, color: theme.text }}>
                 {activeConversation?.muted ? "🔔 Reactivar notificaciones" : "🔇 Silenciar conversación"}
               </Text>
             </Pressable>
-            <Pressable onPress={toggleBlock} style={styles.actionRow}>
-              <Text style={{ fontSize: 14, color: theme.danger }}>{isBlocked ? "✅ Desbloquear usuario" : "🚫 Bloquear usuario"}</Text>
-            </Pressable>
+            {!isGroup && (
+              <Pressable onPress={toggleBlock} style={styles.actionRow}>
+                <Text style={{ fontSize: 14, color: theme.danger }}>{isBlocked ? "✅ Desbloquear usuario" : "🚫 Bloquear usuario"}</Text>
+              </Pressable>
+            )}
           </View>
         </Pressable>
       </Modal>
+
+      <ContactProfileSheet
+        visible={showProfile}
+        conversation={activeConversation}
+        currentUserId={currentUserId ?? 0}
+        onClose={() => setShowProfile(false)}
+        onConversationUpdated={setActiveConversation}
+      />
 
       <KeyboardAvoidingView
         style={styles.flex}
@@ -229,7 +264,7 @@ export default function ChatScreen() {
         {isBlocked ? (
           <View style={[styles.blockedBanner, { borderTopColor: theme.border, backgroundColor: theme.card }]}>
             <Text style={{ fontSize: 12, color: theme.textSecondary, textAlign: "center" }}>
-              Bloqueaste a {otherUsername} — desbloquéalo para volver a escribirle.
+              Bloqueaste a {activeConversation?.otherUsername} — desbloquéalo para volver a escribirle.
             </Text>
           </View>
         ) : (
@@ -299,6 +334,16 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingVertical: 12,
     paddingHorizontal: 16,
+  },
+  headerInfo: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  ephemeralIcon: {
+    fontSize: 16,
   },
   headerTexts: {
     flex: 1,

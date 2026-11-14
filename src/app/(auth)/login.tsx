@@ -10,8 +10,12 @@ import { authService } from "@/services";
 import { useAuthStore } from "@/store/authStore";
 
 function extractMessage(err: unknown, fallback: string): string {
-  const e = err as { response?: { data?: { message?: string } } };
-  return e?.response?.data?.message ?? fallback;
+  const e = err as { response?: { data?: { message?: string } }; message?: string; code?: string };
+  if (e?.response?.data?.message) return e.response.data.message;
+  // TEMPORAL — diagnóstico de conectividad: sin esto, cualquier error sin
+  // `response` (ej. fallo de red) se mostraba como "credenciales incorrectas",
+  // indistinguible de un 401 real. Quitar una vez resuelto.
+  return `${fallback} [DEBUG: code=${e?.code ?? "?"} msg=${e?.message ?? "?"}]`;
 }
 
 export default function LoginScreen() {

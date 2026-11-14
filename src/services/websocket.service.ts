@@ -5,6 +5,7 @@ import type {
   MessageResponse,
   PresenceEvent,
   ReadReceiptEvent,
+  StreakEvent,
   TypingEvent,
   WsInboundMessage,
   WsOutboundMessage,
@@ -27,6 +28,7 @@ export function normalizeWsMessage(raw: WsOutboundMessage): MessageResponse {
     readAt: null,
     deleted: raw.deleted,
     editedAt: raw.editedAt,
+    expiresAt: raw.expiresAt,
   };
 }
 
@@ -35,11 +37,14 @@ type MessageHandler = (msg: MessageResponse, eventType: string) => void;
 type TypingHandler = (evt: TypingEvent) => void;
 type ReadHandler = (evt: ReadReceiptEvent) => void;
 type PresenceHandler = (evt: PresenceEvent) => void;
+type StreakHandler = (evt: StreakEvent) => void;
 
 class WebSocketService {
   private client: Client | null = null;
   private subscriptions: Map<string, StompSubscription> = new Map();
   private onConnectQueue: (() => void)[] = [];
+  private reconnectListeners: Set<() => void> = new Set();
+  private hasConnectedBefore = false;
 
   connect(token: string, onReady?: () => void): void {
     if (this.client?.connected) {
@@ -69,6 +74,14 @@ class WebSocketService {
         const queue = [...this.onConnectQueue];
         this.onConnectQueue = [];
         queue.forEach((fn) => fn());
+
+        // onConnect también dispara en cada reconexión automática (reconnectDelay) —
+        // a partir de la segunda vez, avisamos a quien quiera hacer catch-up
+        // (ver useMessages) de lo que se perdió mientras el socket estaba caído.
+        if (this.hasConnectedBefore) {
+          this.reconnectListeners.forEach((fn) => fn());
+        }
+        this.hasConnectedBefore = true;
       },
       onStompError: (f) => console.error("[WS] Error STOMP:", f.headers["message"]),
       onDisconnect: () => {
@@ -85,6 +98,13 @@ class WebSocketService {
     this.onConnectQueue = [];
     this.client?.deactivate();
     this.client = null;
+    this.hasConnectedBefore = false; // logout real: la próxima conexión vuelve a ser "la primera"
+  }
+
+  /** Se dispara en cada RE-conexión (no en la primera) — usar para "catch-up" tras una caída de red. Devuelve una función para des-registrar. */
+  onReconnect(fn: () => void): () => void {
+    this.reconnectListeners.add(fn);
+    return () => this.reconnectListeners.delete(fn);
   }
 
   get isConnected(): boolean {
@@ -143,6 +163,13 @@ class WebSocketService {
   }
   unsubscribeFromPresence(userId: number): void {
     this.unsubscribe(`/topic/presence.${userId}`);
+  }
+
+  subscribeToStreak(conversationId: number, handler: StreakHandler): void {
+    this._subscribe(`/topic/streak.${conversationId}`, (f) => handler(JSON.parse(f.body) as StreakEvent));
+  }
+  unsubscribeFromStreak(conversationId: number): void {
+    this.unsubscribe(`/topic/streak.${conversationId}`);
   }
 
   subscribeToNotifications(handler: (data: unknown) => void): void {

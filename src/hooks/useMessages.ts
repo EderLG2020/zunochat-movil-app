@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { messageService } from "@/services";
+import { wsService } from "@/services/websocket.service";
 import { useChatStore } from "@/store/chatStore";
 
 interface UseMessagesReturn {
@@ -14,6 +15,7 @@ interface UseMessagesReturn {
 export function useMessages(conversationId: number | null): UseMessagesReturn {
   const setMessages = useChatStore((s) => s.setMessages);
   const prependMessages = useChatStore((s) => s.prependMessages);
+  const appendMessage = useChatStore((s) => s.appendMessage);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -24,6 +26,7 @@ export function useMessages(conversationId: number | null): UseMessagesReturn {
   const conversationIdRef = useRef(conversationId);
   const setMessagesRef = useRef(setMessages);
   const prependRef = useRef(prependMessages);
+  const appendRef = useRef(appendMessage);
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -34,6 +37,9 @@ export function useMessages(conversationId: number | null): UseMessagesReturn {
   useEffect(() => {
     prependRef.current = prependMessages;
   }, [prependMessages]);
+  useEffect(() => {
+    appendRef.current = appendMessage;
+  }, [appendMessage]);
 
   const fetchPageRef = useRef(async (beforeId: number | null, opts: { reset: boolean }) => {
     const convId = conversationIdRef.current;
@@ -63,6 +69,24 @@ export function useMessages(conversationId: number | null): UseMessagesReturn {
     // ya bloquea loadMore(); el propio fetch corrige hasMore al resolver.
     fetchPageRef.current(null, { reset: true });
   }, [conversationId]);
+
+  // Catch-up: si el WS se cayó y volvió a conectar (red inestable, app en
+  // background, etc.), un mensaje enviado por el otro lado durante ese lapso
+  // nunca llega por WS — sin esto, solo aparecía si el usuario salía del
+  // chat y volvía a entrar. Se pide la página más reciente y se agregan solo
+  // los mensajes que el store todavía no tiene (appendMessage deduplica por messageId).
+  useEffect(() => {
+    return wsService.onReconnect(() => {
+      const convId = conversationIdRef.current;
+      if (!convId) return;
+      messageService
+        .list(convId, null, 30)
+        .then((result) => {
+          [...result.content].reverse().forEach((m) => appendRef.current(m));
+        })
+        .catch(() => {/* catch-up es best-effort, no bloquea la UI si falla */});
+    });
+  }, []);
 
   const loadMore = useCallback(() => {
     if (!hasMore || isLoading || isLoadingMore) return;
